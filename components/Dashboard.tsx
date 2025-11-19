@@ -1,7 +1,7 @@
 import React from 'react';
 import { Note } from '../types';
 import { NoteCard } from './NoteCard';
-import { Plus, Search, BrainCircuit, BookOpen } from 'lucide-react';
+import { Plus, Search, BrainCircuit, BookOpen, Trash2 } from 'lucide-react';
 import { Button } from './Button';
 
 interface DashboardProps {
@@ -11,6 +11,7 @@ interface DashboardProps {
   onDeleteNote: (id: string) => void;
   onGenerateToc: () => void;
   onGenerateQuiz: () => void;
+  onOpenRecycleBin: () => void;
   loadingSmart: boolean;
 }
 
@@ -21,28 +22,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onDeleteNote,
   onGenerateToc,
   onGenerateQuiz,
+  onOpenRecycleBin,
   loadingSmart
 }) => {
   const [searchTerm, setSearchTerm] = React.useState('');
 
-  const filteredNotes = notes.filter(n => 
+  // Only show active (non-deleted) notes
+  const activeNotes = notes.filter(n => !n.isDeleted);
+
+  const filteredNotes = activeNotes.filter(n => 
     n.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
     n.content.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const deletedCount = notes.filter(n => n.isDeleted).length;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">My Notes</h1>
-          <p className="text-slate-500">You have {notes.length} notes</p>
+          <p className="text-slate-500">You have {activeNotes.length} active notes</p>
         </div>
         
         <div className="flex flex-wrap gap-3">
           <Button 
             variant="secondary" 
+            onClick={onOpenRecycleBin}
+            icon={<Trash2 className="w-4 h-4 text-slate-600" />}
+          >
+            Recycle Bin ({deletedCount})
+          </Button>
+          <Button 
+            variant="secondary" 
             onClick={onGenerateToc}
-            disabled={notes.length < 2}
+            disabled={activeNotes.length < 2}
             isLoading={loadingSmart}
             icon={<BookOpen className="w-4 h-4" />}
           >
@@ -51,7 +65,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <Button 
             variant="secondary" 
             onClick={onGenerateQuiz}
-            disabled={notes.length < 1}
+            disabled={activeNotes.length < 1}
             isLoading={loadingSmart}
             icon={<BrainCircuit className="w-4 h-4 text-indigo-600" />}
           >

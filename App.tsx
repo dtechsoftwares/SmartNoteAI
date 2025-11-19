@@ -5,22 +5,40 @@ import { Dashboard } from './components/Dashboard';
 import { NoteEditor } from './components/NoteEditor';
 import { SmartView } from './components/SmartView';
 import { QuizView } from './components/QuizView';
+import { SplashScreen } from './components/SplashScreen';
+import { LoadingOverlay } from './components/LoadingOverlay';
+import { AdminModal } from './components/AdminModal';
+import { RecycleBin } from './components/RecycleBin';
+import { Layout } from './components/Layout';
+import { UsersView } from './components/UsersView';
+import { SettingsView } from './components/SettingsView';
 import { generateTableOfContents, generateQuizFromNotes } from './services/geminiService';
 
 const App: React.FC = () => {
-  // State
+  // UI State
+  const [showSplash, setShowSplash] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Data State
   const [user, setUser] = useState<User | null>(null);
   const [view, setView] = useState<AppView>(AppView.LOGIN);
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeNote, setActiveNote] = useState<Note | undefined>(undefined);
   
+  // Admin & Delete State
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  
   // Smart features state
   const [toc, setToc] = useState<TocItem[]>([]);
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
-  const [loadingSmart, setLoadingSmart] = useState(false);
 
-  // Initialize from local storage
+  // Initialize from local storage and Splash Timer
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 2500);
+
     const savedUser = localStorage.getItem('smartnote_user');
     const savedNotes = localStorage.getItem('smartnote_notes');
     
@@ -31,6 +49,8 @@ const App: React.FC = () => {
     if (savedNotes) {
       setNotes(JSON.parse(savedNotes));
     }
+
+    return () => clearTimeout(timer);
   }, []);
 
   // Persist notes
@@ -38,61 +58,113 @@ const App: React.FC = () => {
     localStorage.setItem('smartnote_notes', JSON.stringify(notes));
   }, [notes]);
 
+  // Helper to wrap async actions with loader
+  const withLoader = async (action: () => Promise<void> | void, minDuration = 500) => {
+    setIsLoading(true);
+    const start = Date.now();
+    try {
+      await action();
+    } finally {
+      const elapsed = Date.now() - start;
+      const remaining = Math.max(0, minDuration - elapsed);
+      setTimeout(() => setIsLoading(false), remaining);
+    }
+  };
+
   // Auth Handlers
   const handleLogin = (userData: User) => {
-    setUser(userData);
-    localStorage.setItem('smartnote_user', JSON.stringify(userData));
-    setView(AppView.DASHBOARD);
+    withLoader(() => {
+      setUser(userData);
+      localStorage.setItem('smartnote_user', JSON.stringify(userData));
+      setView(AppView.DASHBOARD);
+    });
   };
 
   const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('smartnote_user');
-    setView(AppView.LOGIN);
+    withLoader(() => {
+      setUser(null);
+      localStorage.removeItem('smartnote_user');
+      setView(AppView.LOGIN);
+    });
   };
 
   // Note Handlers
   const handleSaveNote = (updatedNote: Partial<Note>) => {
-    if (updatedNote.id) {
-      setNotes(notes.map(n => n.id === updatedNote.id ? { ...n, ...updatedNote } as Note : n));
-    } else {
-      const newNote: Note = {
-        id: crypto.randomUUID(),
-        title: updatedNote.title || 'Untitled',
-        content: updatedNote.content || '',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        tags: []
-      };
-      setNotes([newNote, ...notes]);
-    }
-    setView(AppView.DASHBOARD);
+    withLoader(() => {
+      if (updatedNote.id) {
+        setNotes(notes.map(n => n.id === updatedNote.id ? { ...n, ...updatedNote } as Note : n));
+      } else {
+        const newNote: Note = {
+          id: crypto.randomUUID(),
+          title: updatedNote.title || 'Untitled',
+          content: updatedNote.content || '',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          tags: [],
+          isDeleted: false
+        };
+        setNotes([newNote, ...notes]);
+      }
+      setView(AppView.DASHBOARD);
+    });
   };
 
-  const handleDeleteNote = (id: string) => {
-    if (window.confirm("Are you sure you want to delete this note?")) {
-      setNotes(notes.filter(n => n.id !== id));
+  // Initial Delete Request (Move to Trash)
+  const handleDeleteRequest = (id: string) => {
+    setPendingDeleteId(id);
+    setShowAdminModal(true);
+  };
+
+  // Confirmed Delete (After Admin Key)
+  const handleConfirmDelete = () => {
+    if (pendingDeleteId) {
+      withLoader(() => {
+        setNotes(notes.map(n => 
+          n.id === pendingDeleteId ? { ...n, isDeleted: true, updatedAt: Date.now() } : n
+        ));
+        setShowAdminModal(false);
+        setPendingDeleteId(null);
+      });
+    }
+  };
+
+  // Recycle Bin Handlers
+  const handleRestoreNote = (id: string) => {
+    withLoader(() => {
+      setNotes(notes.map(n => 
+        n.id === id ? { ...n, isDeleted: false, updatedAt: Date.now() } : n
+      ));
+    });
+  };
+
+  const handleDeleteForever = (id: string) => {
+    if (window.confirm("This action cannot be undone. Delete permanently?")) {
+      withLoader(() => {
+        setNotes(notes.filter(n => n.id !== id));
+      });
     }
   };
 
   // Smart Features Handlers
   const handleGenerateToc = async () => {
-    setLoadingSmart(true);
+    setIsLoading(true);
     try {
-      const result = await generateTableOfContents(notes);
+      const activeNotes = notes.filter(n => !n.isDeleted);
+      const result = await generateTableOfContents(activeNotes);
       setToc(result);
       setView(AppView.SMART_VIEW);
     } catch (error) {
       alert("Failed to generate organization. Please check your connection.");
     } finally {
-      setLoadingSmart(false);
+      setIsLoading(false);
     }
   };
 
   const handleGenerateQuiz = async () => {
-    setLoadingSmart(true);
+    setIsLoading(true);
     try {
-      const result = await generateQuizFromNotes(notes);
+      const activeNotes = notes.filter(n => !n.isDeleted);
+      const result = await generateQuizFromNotes(activeNotes);
       if (result.length > 0) {
         setQuizQuestions(result);
         setView(AppView.QUIZ);
@@ -102,75 +174,98 @@ const App: React.FC = () => {
     } catch (error) {
       alert("Failed to generate quiz.");
     } finally {
-      setLoadingSmart(false);
+      setIsLoading(false);
     }
+  };
+
+  const switchView = (newView: AppView) => {
+    withLoader(() => setView(newView), 300);
   };
 
   // Navigation Render Logic
   const renderContent = () => {
     switch (view) {
       case AppView.LOGIN:
-        return <Auth view="LOGIN" onLogin={handleLogin} onSwitchView={() => setView(AppView.REGISTER)} />;
+        return <Auth view="LOGIN" onLogin={handleLogin} onSwitchView={(v) => setView(v === 'LOGIN' ? AppView.LOGIN : AppView.REGISTER)} />;
       case AppView.REGISTER:
-        return <Auth view="REGISTER" onLogin={handleLogin} onSwitchView={() => setView(AppView.LOGIN)} />;
+        return <Auth view="REGISTER" onLogin={handleLogin} onSwitchView={(v) => setView(v === 'LOGIN' ? AppView.LOGIN : AppView.REGISTER)} />;
       case AppView.EDITOR:
-        return <NoteEditor note={activeNote} onSave={handleSaveNote} onBack={() => setView(AppView.DASHBOARD)} />;
+        return <NoteEditor note={activeNote} onSave={handleSaveNote} onBack={() => switchView(AppView.DASHBOARD)} />;
       case AppView.SMART_VIEW:
         return (
           <SmartView 
             toc={toc} 
             notes={notes} 
-            onBack={() => setView(AppView.DASHBOARD)}
+            onBack={() => switchView(AppView.DASHBOARD)}
             onSelectNote={(note) => {
               setActiveNote(note);
-              setView(AppView.EDITOR);
+              switchView(AppView.EDITOR);
             }} 
           />
         );
       case AppView.QUIZ:
-        return <QuizView questions={quizQuestions} onBack={() => setView(AppView.DASHBOARD)} />;
-      case AppView.DASHBOARD:
+        return <QuizView questions={quizQuestions} onBack={() => switchView(AppView.DASHBOARD)} />;
+      
+      // Layout Wrapped Views
       default:
         return (
-          <div className="min-h-screen flex flex-col">
-            <header className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center sticky top-0 z-20">
-               <div className="flex items-center gap-2">
-                 <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">SN</div>
-                 <span className="font-bold text-slate-800 hidden sm:inline">SmartNote AI</span>
-               </div>
-               <div className="flex items-center gap-4">
-                 <span className="text-sm text-slate-500 hidden sm:inline">Welcome, {user?.username}</span>
-                 <button onClick={handleLogout} className="text-sm font-medium text-slate-600 hover:text-indigo-600">
-                   Logout
-                 </button>
-               </div>
-            </header>
-            <Dashboard 
-              notes={notes}
-              onNewNote={() => {
-                setActiveNote(undefined);
-                setView(AppView.EDITOR);
-              }}
-              onSelectNote={(note) => {
-                setActiveNote(note);
-                setView(AppView.EDITOR);
-              }}
-              onDeleteNote={handleDeleteNote}
-              onGenerateToc={handleGenerateToc}
-              onGenerateQuiz={handleGenerateQuiz}
-              loadingSmart={loadingSmart}
-            />
-            <footer className="py-6 text-center text-xs text-slate-400 bg-slate-50 mt-auto">
-               Powered By: DTECHSOFTWARES
-            </footer>
-          </div>
+          <Layout 
+            user={user} 
+            currentView={view} 
+            onNavigate={switchView}
+            onLogout={handleLogout}
+          >
+            {view === AppView.DASHBOARD && (
+              <Dashboard 
+                notes={notes}
+                onNewNote={() => {
+                  setActiveNote(undefined);
+                  switchView(AppView.EDITOR);
+                }}
+                onSelectNote={(note) => {
+                  setActiveNote(note);
+                  switchView(AppView.EDITOR);
+                }}
+                onDeleteNote={handleDeleteRequest}
+                onGenerateToc={handleGenerateToc}
+                onGenerateQuiz={handleGenerateQuiz}
+                onOpenRecycleBin={() => switchView(AppView.RECYCLE_BIN)}
+                loadingSmart={isLoading}
+              />
+            )}
+            {view === AppView.USERS && <UsersView currentUser={user} />}
+            {view === AppView.SETTINGS && <SettingsView />}
+            {view === AppView.RECYCLE_BIN && (
+              <div className="h-full relative">
+                 {/* We modify RecycleBin style via props or wrapping if needed, but existing component is fine if we treat it as content area */}
+                 <RecycleBin
+                  deletedNotes={notes.filter(n => n.isDeleted)}
+                  onRestore={handleRestoreNote}
+                  onDeleteForever={handleDeleteForever}
+                  onBack={() => switchView(AppView.DASHBOARD)}
+                />
+              </div>
+            )}
+          </Layout>
         );
     }
   };
 
   return (
-    <div className="bg-slate-50 text-slate-900 font-sans">
-      {renderContent()}
+    <div className="bg-slate-50 text-slate-900 font-sans min-h-screen relative">
+      {showSplash && <SplashScreen />}
+      {isLoading && <LoadingOverlay />}
+      
+      <AdminModal 
+        isOpen={showAdminModal}
+        onClose={() => {
+          setShowAdminModal(false);
+          setPendingDeleteId(null);
+        }}
+        onConfirm={handleConfirmDelete}
+      />
+
+      {!showSplash && renderContent()}
     </div>
   );
 };

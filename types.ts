@@ -5,6 +5,7 @@ export interface Note {
   createdAt: number;
   updatedAt: number;
   tags: string[];
+  isDeleted?: boolean;
 }
 
 export interface User {
@@ -38,7 +39,10 @@ export enum AppView {
   DASHBOARD = 'DASHBOARD',
   EDITOR = 'EDITOR',
   QUIZ = 'QUIZ',
-  SMART_VIEW = 'SMART_VIEW' // Table of Contents view
+  SMART_VIEW = 'SMART_VIEW', // Table of Contents view
+  RECYCLE_BIN = 'RECYCLE_BIN',
+  USERS = 'USERS',
+  SETTINGS = 'SETTINGS'
 }
 
 export interface SmartAnalysisResult {
